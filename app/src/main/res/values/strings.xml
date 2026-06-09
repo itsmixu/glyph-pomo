@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Glyph Pomodoro</string>
+    <string name="toy_name">Pomodoro</string>
+    <string name="toy_summary">A glanceable Pomodoro timer. Shake to start.</string>
+</resources>

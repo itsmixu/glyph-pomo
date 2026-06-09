@@ -1,0 +1,42 @@
+package org.stuhi.glyphpomodoro
+
+import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private val Context.dataStore by preferencesDataStore(name = "settings")
+
+/** Tunable config for shake detection and matrix brightness. */
+data class Settings(
+    /** Accelerometer magnitude (m/s²) a shake must exceed. */
+    val shakeThreshold: Float = 12f,
+    /** LED brightness while running (0–255). */
+    val brightness: Int = 255,
+    /** LED brightness while paused (0–255). */
+    val pausedBrightness: Int = 90,
+)
+
+class SettingsRepo(private val ctx: Context) {
+
+    val flow: Flow<Settings> = ctx.dataStore.data.map { p ->
+        Settings(
+            shakeThreshold = p[SHAKE] ?: 12f,
+            brightness = p[BRIGHT] ?: 255,
+            pausedBrightness = p[BRIGHT_PAUSED] ?: 90,
+        )
+    }
+
+    suspend fun setShakeThreshold(v: Float) = ctx.dataStore.edit { it[SHAKE] = v }
+    suspend fun setBrightness(v: Int) = ctx.dataStore.edit { it[BRIGHT] = v }
+    suspend fun setPausedBrightness(v: Int) = ctx.dataStore.edit { it[BRIGHT_PAUSED] = v }
+
+    private companion object {
+        val SHAKE = floatPreferencesKey("shake_threshold")
+        val BRIGHT = intPreferencesKey("brightness")
+        val BRIGHT_PAUSED = intPreferencesKey("brightness_paused")
+    }
+}
