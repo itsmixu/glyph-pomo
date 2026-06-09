@@ -12,8 +12,8 @@ android {
         applicationId = "org.stuhi.glyphpomodoro"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("appVersionName") as String?) ?: "0.1.0"
     }
 
     buildTypes {

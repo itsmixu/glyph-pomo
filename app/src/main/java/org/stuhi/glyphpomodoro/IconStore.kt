@@ -13,6 +13,8 @@ object IconStore {
     enum class Icon { PLAY, PAUSE, RESET }
 
     private const val DEFAULT_DUR = 150
+    private const val DEFAULT_HOLD_FIRST = 250
+    private const val DEFAULT_HOLD_LAST = 250
 
     private var cache: MutableMap<Icon, MutableList<BooleanArray>>? = null
     private var dur = DEFAULT_DUR
@@ -99,8 +101,8 @@ object IconStore {
         cache?.let { return it }
         val p = prefs(ctx)
         dur = p.getInt("dur", DEFAULT_DUR)
-        holdFirst = p.getInt("hold_first", 0)
-        holdLast = p.getInt("hold_last", 0)
+        holdFirst = p.getInt("hold_first", DEFAULT_HOLD_FIRST)
+        holdLast = p.getInt("hold_last", DEFAULT_HOLD_LAST)
         val n2 = cellCount()
         val map = mutableMapOf<Icon, MutableList<BooleanArray>>()
         for (icon in Icon.entries) {
@@ -132,13 +134,22 @@ object IconStore {
     }
 
     private fun defaultFrame(icon: Icon, n2: Int): BooleanArray {
+        val drawn = DEFAULTS[icon]
+        if (drawn != null && drawn.length == n2) return BooleanArray(n2) { drawn[it] == '1' }
+        // Fallback if the matrix size differs from the bundled 13×13 art.
         val arr = when (icon) {
             Icon.PLAY -> MatrixRenderer.play(255)
             Icon.PAUSE -> MatrixRenderer.pause(255)
-            Icon.RESET -> MatrixRenderer.edge(255) // a ring as a starting point
+            Icon.RESET -> MatrixRenderer.edge(255)
         }
         return BooleanArray(n2) { it < arr.size && arr[it] > 0 }
     }
+
+    private val DEFAULTS = mapOf(
+        Icon.PLAY to "0000000000000000000000000000000000000000000011000000000001010000000000100100000000010001000000001001000000000101000000000011000000000000000000000000000000000000000000000",
+        Icon.PAUSE to "0000000000000000000000000000000000000000000100010000000010001000000001000100000000100010000000010001000000001000100000000100010000000000000000000000000000000000000000000",
+        Icon.RESET to "0000000000000000000000000000000000000000001011100000000110001000000011100010000000000001000000000000100000000000100000000011100000000000000000000000000000000000000000000",
+    )
 
     private fun cellCount(): Int = MatrixRenderer.size() * MatrixRenderer.size()
 

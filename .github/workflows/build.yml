@@ -1,8 +1,17 @@
-name: Build APK
+name: Release
 
-# Manually triggered: run from the Actions tab (or `gh workflow run build.yml`).
+# Manually triggered: supply the version and changelog for this release.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.1.0 → tag v0.1.0)"
+        required: true
+        default: "0.1.0"
+      notes:
+        description: "What changed in this version"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -25,21 +34,21 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
 
-      - name: Build debug APK
+      - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace \
+            -PappVersionName=${{ inputs.version }} \
+            -PappVersionCode=${{ github.run_number }}
 
       - name: Stage APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk glyph-pomodoro-${{ github.run_number }}.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk glyph-pomodoro-v${{ inputs.version }}.apk
 
       - name: Draft release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          tag_name: build-${{ github.run_number }}
-          name: Glyph Pomodoro build ${{ github.run_number }}
-          body: |
-            Automated debug build (run ${{ github.run_number }}, commit ${{ github.sha }}).
-            Sideload: `adb install -r glyph-pomodoro-${{ github.run_number }}.apk`
-          files: glyph-pomodoro-${{ github.run_number }}.apk
+          tag_name: v${{ inputs.version }}
+          name: Glyph Pomodoro v${{ inputs.version }}
+          body: ${{ inputs.notes }}
+          files: glyph-pomodoro-v${{ inputs.version }}.apk

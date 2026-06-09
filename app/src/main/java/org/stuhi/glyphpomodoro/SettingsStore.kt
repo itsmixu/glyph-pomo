@@ -15,13 +15,13 @@ data class Settings(
     /** Accelerometer magnitude (m/s²) a shake must exceed to start/pause. */
     val shakeThreshold: Float = 12f,
     /** Magnitude a sustained shake must exceed to count toward a reset. */
-    val resetShakeThreshold: Float = 12f,
+    val resetShakeThreshold: Float = 8f,
     /** How long the sustained shake must last (ms) to reset. */
-    val resetHoldMs: Int = 1500,
+    val resetHoldMs: Int = 970,
     /** LED brightness while running (0–255). */
     val brightness: Int = 255,
     /** LED brightness while paused (0–255). */
-    val pausedBrightness: Int = 90,
+    val pausedBrightness: Int = 70,
 )
 
 class SettingsRepo(private val ctx: Context) {
@@ -29,10 +29,10 @@ class SettingsRepo(private val ctx: Context) {
     val flow: Flow<Settings> = ctx.dataStore.data.map { p ->
         Settings(
             shakeThreshold = p[SHAKE] ?: 12f,
-            resetShakeThreshold = p[RESET_SHAKE] ?: 12f,
-            resetHoldMs = p[RESET_HOLD] ?: 1500,
+            resetShakeThreshold = p[RESET_SHAKE] ?: 8f,
+            resetHoldMs = p[RESET_HOLD] ?: 970,
             brightness = p[BRIGHT] ?: 255,
-            pausedBrightness = p[BRIGHT_PAUSED] ?: 90,
+            pausedBrightness = p[BRIGHT_PAUSED] ?: 70,
         )
     }
 
