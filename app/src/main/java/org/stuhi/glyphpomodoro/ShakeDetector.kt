@@ -12,15 +12,17 @@ import kotlin.math.sqrt
 
 /**
  * Distinguishes two gestures from the accelerometer:
- *  - a quick shake → [onShake] (fired once the motion settles), used to start / pause / resume.
- *  - a long, sustained shake (≥ [LONG_MS]) → [onLongShake], used to reset.
+ *  - a quick shake above [threshold] → [onShake] (fired once motion settles): start/pause/resume.
+ *  - a sustained shake above [resetThreshold] held for [resetHoldMs] → [onLongShake]: reset.
  *
- * The single shake is deferred until the motion settles so a long shake doesn't toggle first.
+ * The single shake is deferred until motion settles so a reset doesn't toggle first.
  * Reports the live magnitude via [onAccel] for the calibration UI.
  */
 class ShakeDetector(
     context: Context,
     @Volatile var threshold: Float,
+    @Volatile var resetThreshold: Float = threshold,
+    @Volatile var resetHoldMs: Long = 1500L,
     private val onAccel: (Float) -> Unit = {},
     private val onShake: () -> Unit,
     private val onLongShake: () -> Unit = {},
@@ -32,14 +34,17 @@ class ShakeDetector(
     private val usesGravity = accel?.type == Sensor.TYPE_ACCELEROMETER
 
     private var inGesture = false
-    private var gestureStart = 0L
     private var lastAbove = 0L
     private var longFired = false
+
+    private var resetStart = 0L
+    private var lastResetAbove = 0L
+
     private var lastLog = 0L
 
     fun start() {
         if (accel == null) Log.w(TAG, "no accelerometer available")
-        else Log.d(TAG, "start: sensor=${accel.name} type=${accel.type} threshold=$threshold")
+        else Log.d(TAG, "start: sensor=${accel.name} threshold=$threshold reset=$resetThreshold/${resetHoldMs}ms")
         accel?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
     }
 
@@ -58,24 +63,30 @@ class ShakeDetector(
             Log.d(TAG, "alive mag=%.1f (thr %.1f)".format(mag, threshold))
         }
 
-        if (mag > threshold) {
-            lastAbove = now
-            if (!inGesture) {
-                inGesture = true
-                gestureStart = now
-                longFired = false
-            }
-            if (!longFired && now - gestureStart >= LONG_MS) {
+        // Reset tracker: sustained motion above resetThreshold for resetHoldMs.
+        if (mag > resetThreshold) {
+            if (resetStart == 0L) resetStart = now
+            lastResetAbove = now
+            if (!longFired && now - resetStart >= resetHoldMs) {
                 longFired = true
                 Log.d(TAG, "LONG SHAKE -> reset")
                 onLongShake()
             }
+        } else if (resetStart != 0L && now - lastResetAbove >= SETTLE_MS) {
+            resetStart = 0L
+        }
+
+        // Toggle gesture: a quick shake above threshold, fired once motion settles.
+        if (mag > threshold) {
+            lastAbove = now
+            inGesture = true
         } else if (inGesture && now - lastAbove >= SETTLE_MS) {
             inGesture = false
             if (!longFired) {
                 Log.d(TAG, "SHAKE (toggle)")
                 onShake()
             }
+            longFired = false
         }
     }
 
@@ -83,7 +94,6 @@ class ShakeDetector(
 
     private companion object {
         const val TAG = "GlyphShake"
-        const val LONG_MS = 1500L   // sustained shaking past this resets
-        const val SETTLE_MS = 350L  // motion must be calm this long to count a quick shake
+        const val SETTLE_MS = 350L
     }
 }

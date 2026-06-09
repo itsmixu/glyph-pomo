@@ -186,18 +186,22 @@ private fun HomeScreen(onEditDigits: () -> Unit, onEditIcons: () -> Unit) {
 
             SectionLabel("BRIGHTNESS")
             Panel {
-                SliderRow("RUNNING", "${settings.brightness}", settings.brightness.toFloat(), 1f..255f) { v ->
+                SliderRow("RUNNING", "${settings.brightness}", settings.brightness.toFloat(), 65f..255f) { v ->
                     scope.launch { repo.setBrightness(v.toInt()) }
                 }
                 Spacer(Modifier.height(6.dp))
-                SliderRow("PAUSED", "${settings.pausedBrightness}", settings.pausedBrightness.toFloat(), 0f..255f) { v ->
-                    scope.launch { repo.setPausedBrightness(v.toInt()) }
-                }
+                SliderRow(
+                    "PAUSED",
+                    if (settings.pausedBrightness <= 0) "off" else "${settings.pausedBrightness}",
+                    settings.pausedBrightness.toFloat(), 0f..255f,
+                ) { v -> scope.launch { repo.setPausedBrightness(v.toInt()) } }
             }
 
             SectionLabel("SHAKE")
             ShakeCard(
                 threshold = settings.shakeThreshold,
+                resetStrength = settings.resetShakeThreshold,
+                resetHoldMs = settings.resetHoldMs,
                 testOn = testOn,
                 onTest = { shakeCount = 0; testOn = it },
                 flash = flash,
@@ -205,6 +209,8 @@ private fun HomeScreen(onEditDigits: () -> Unit, onEditIcons: () -> Unit) {
                 accelAvg = accelAvg,
                 accelPeak = accelPeak,
                 onThreshold = { v -> scope.launch { repo.setShakeThreshold(v) } },
+                onResetStrength = { v -> scope.launch { repo.setResetShakeThreshold(v) } },
+                onResetHold = { v -> scope.launch { repo.setResetHoldMs(v.toInt()) } },
             )
             Spacer(Modifier.height(8.dp))
         }
@@ -288,6 +294,8 @@ private fun ControlBar(primaryLabel: String, onCtl: (Ctl) -> Unit) {
 @Composable
 private fun ShakeCard(
     threshold: Float,
+    resetStrength: Float,
+    resetHoldMs: Int,
     testOn: Boolean,
     onTest: (Boolean) -> Unit,
     flash: Boolean,
@@ -295,10 +303,12 @@ private fun ShakeCard(
     accelAvg: Float,
     accelPeak: Float,
     onThreshold: (Float) -> Unit,
+    onResetStrength: (Float) -> Unit,
+    onResetHold: (Float) -> Unit,
 ) {
     Panel {
         Text(
-            "Shake to start, then shake again to pause or resume. Tune the threshold just under your shake's peak.",
+            "Shake to start/pause. A long, hard shake resets. Tune each just under your shake's peak.",
             style = MaterialTheme.typography.bodySmall, color = Glyph.Muted,
         )
         Spacer(Modifier.height(14.dp))
@@ -324,9 +334,19 @@ private fun ShakeCard(
 
         Spacer(Modifier.height(16.dp))
         SliderRow(
-            "JOLT",
+            "START / PAUSE",
             "avg ${"%.1f".format(accelAvg)}  pk ${"%.1f".format(accelPeak)}  ▸ ${"%.1f".format(threshold)}",
             threshold, 0f..30f, onThreshold,
+        )
+        SliderRow(
+            "RESET STRENGTH",
+            "▸ ${"%.1f".format(resetStrength)}",
+            resetStrength, 0f..30f, onResetStrength,
+        )
+        SliderRow(
+            "RESET HOLD",
+            "${"%.1f".format(resetHoldMs / 1000f)} s",
+            resetHoldMs.toFloat(), 500f..4000f, onResetHold,
         )
     }
 }

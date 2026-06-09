@@ -43,6 +43,8 @@ class PomodoroToyService : Service() {
     private var shake: ShakeDetector? = null
     private var armTimeout: Runnable? = null
     @Volatile private var shakeThreshold = Settings().shakeThreshold
+    @Volatile private var resetThreshold = Settings().resetShakeThreshold
+    @Volatile private var resetHoldMs = Settings().resetHoldMs.toLong()
     @Volatile private var brightnessActive = Settings().brightness
     @Volatile private var brightnessPaused = Settings().pausedBrightness
 
@@ -71,7 +73,11 @@ class PomodoroToyService : Service() {
         scope.launch {
             repo.flow.collectLatest {
                 shakeThreshold = it.shakeThreshold
+                resetThreshold = it.resetShakeThreshold
+                resetHoldMs = it.resetHoldMs.toLong()
                 shake?.threshold = it.shakeThreshold
+                shake?.resetThreshold = it.resetShakeThreshold
+                shake?.resetHoldMs = it.resetHoldMs.toLong()
                 brightnessActive = it.brightness
                 brightnessPaused = it.pausedBrightness
             }
@@ -118,6 +124,8 @@ class PomodoroToyService : Service() {
         shake = ShakeDetector(
             context = applicationContext,
             threshold = shakeThreshold,
+            resetThreshold = resetThreshold,
+            resetHoldMs = resetHoldMs,
             onShake = { onShakeTrigger() },
             onLongShake = { onLongReset() },
         ).also { it.start() }
@@ -189,14 +197,15 @@ class PomodoroToyService : Service() {
             val animLen = maxOf(plan.cycleMs, MARKER_MIN_MS)
             val elapsed = SystemClock.elapsedRealtime() - snap.markerStartElapsed
             if (elapsed < animLen) {
+                val on = floorBrightness(brightnessActive)
                 val cells = plan.frameAt(elapsed)
-                setFrame(IntArray(cells.size) { if (cells[it]) brightnessActive else 0 })
+                setFrame(IntArray(cells.size) { if (cells[it]) on else 0 })
                 return durMs.coerceIn(20, 250).toLong()
             }
         }
 
         val dim = snap.state == RunState.PAUSED
-        val brightness = if (dim) brightnessPaused else brightnessActive
+        val brightness = floorBrightness(if (dim) brightnessPaused else brightnessActive)
         val n = MatrixRenderer.size()
         when {
             snap.state == RunState.DORMANT || snap.state == RunState.ARMED ->
@@ -215,6 +224,9 @@ class PomodoroToyService : Service() {
         }
         return 250L
     }
+
+    /** LEDs don't light below ~65, so a positive brightness is lifted into the visible range. */
+    private fun floorBrightness(b: Int): Int = if (b <= 0) 0 else b.coerceIn(MIN_VISIBLE, 255)
 
     private fun minutesText(): String {
         val remaining = TimerController.remainingMs(System.currentTimeMillis())
@@ -247,5 +259,7 @@ class PomodoroToyService : Service() {
         const val MARKER_MIN_MS = 1000L
         /** Gravity Z below this (m/s²) means screen-down & roughly flat → matrix faces up. */
         const val FACE_DOWN_Z = -9f
+        /** LEDs are dark below roughly this value. */
+        const val MIN_VISIBLE = 65
     }
 }
