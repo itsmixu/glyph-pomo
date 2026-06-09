@@ -47,6 +47,11 @@ class PomodoroToyService : Service() {
     @Volatile private var resetHoldMs = Settings().resetHoldMs.toLong()
     @Volatile private var brightnessActive = Settings().brightness
     @Volatile private var brightnessPaused = Settings().pausedBrightness
+    @Volatile private var offWhenUpright = Settings().offWhenUpright
+    @Volatile private var pauseOnPickup = Settings().pauseOnPickup
+    @Volatile private var autoResume = Settings().autoResume
+    @Volatile private var haptics = Settings().haptics
+    private var pausedByPickup = false
 
     // Face-down detection (matrix is on the back, so it's only visible when screen is down).
     private val sensorManager by lazy { getSystemService(SENSOR_SERVICE) as SensorManager }
@@ -56,8 +61,31 @@ class PomodoroToyService : Service() {
     }
     @Volatile private var faceDown = true
     private val orientationListener = object : SensorEventListener {
-        override fun onSensorChanged(e: SensorEvent) { faceDown = e.values[2] < FACE_DOWN_Z }
+        override fun onSensorChanged(e: SensorEvent) {
+            val z = e.values[2]
+            // Hysteresis: enter face-down at -9, leave at -7, so it doesn't flap.
+            val newFd = if (faceDown) z < FACE_UP_Z else z < FACE_DOWN_Z
+            if (newFd != faceDown) {
+                faceDown = newFd
+                main.post { onOrientationChanged(newFd) }
+            }
+        }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private fun onOrientationChanged(down: Boolean) {
+        val state = TimerController.state.value.state
+        if (!down && pauseOnPickup && state == RunState.RUNNING) {
+            TimerController.onTrigger(applicationContext) // pause
+            pausedByPickup = true
+            PomodoroAlarm.scheduleOrCancel(applicationContext)
+            PomodoroNotification.update(applicationContext)
+        } else if (down && autoResume && pausedByPickup && state == RunState.PAUSED) {
+            TimerController.onTrigger(applicationContext) // resume
+            pausedByPickup = false
+            PomodoroAlarm.scheduleOrCancel(applicationContext)
+            PomodoroNotification.update(applicationContext)
+        }
     }
 
     private val renderLoop = object : Runnable {
@@ -80,6 +108,10 @@ class PomodoroToyService : Service() {
                 shake?.resetHoldMs = it.resetHoldMs.toLong()
                 brightnessActive = it.brightness
                 brightnessPaused = it.pausedBrightness
+                offWhenUpright = it.offWhenUpright
+                pauseOnPickup = it.pauseOnPickup
+                autoResume = it.autoResume
+                haptics = it.haptics
             }
         }
     }
@@ -138,7 +170,9 @@ class PomodoroToyService : Service() {
     private fun onShakeTrigger() = main.post {
         Log.d(TAG, "shake trigger, state=${TimerController.state.value.state}")
         armTimeout?.let { main.removeCallbacks(it) }
+        pausedByPickup = false
         TimerController.onTrigger(applicationContext)
+        if (haptics) Haptics.tick(applicationContext)
         PomodoroAlarm.scheduleOrCancel(applicationContext)
         PomodoroNotification.update(applicationContext)
     }
@@ -146,6 +180,7 @@ class PomodoroToyService : Service() {
     private fun onLongReset() = main.post {
         Log.d(TAG, "long shake -> reset")
         armTimeout?.let { main.removeCallbacks(it) }
+        pausedByPickup = false
         TimerController.reset(applicationContext)
         PomodoroAlarm.cancel(applicationContext)
         PomodoroNotification.update(applicationContext)
@@ -178,8 +213,8 @@ class PomodoroToyService : Service() {
 
     /** Renders the current frame and returns how long to wait before the next render. */
     private fun renderFrame(): Long {
-        // Only light the matrix when the phone is face-down (matrix facing up).
-        if (!faceDown) {
+        // Only light the matrix when the phone is face-down (matrix facing up), if enabled.
+        if (offWhenUpright && !faceDown) {
             setFrame(MatrixRenderer.blank())
             return 500L
         }
@@ -226,7 +261,7 @@ class PomodoroToyService : Service() {
     }
 
     /** LEDs don't light below ~65, so a positive brightness is lifted into the visible range. */
-    private fun floorBrightness(b: Int): Int = if (b <= 0) 0 else b.coerceIn(MIN_VISIBLE, 255)
+    private fun floorBrightness(b: Int): Int = if (b <= 0) 0 else b.coerceIn(MIN_VISIBLE, MAX_BRIGHTNESS)
 
     private fun minutesText(): String {
         val remaining = TimerController.remainingMs(System.currentTimeMillis())
@@ -259,7 +294,11 @@ class PomodoroToyService : Service() {
         const val MARKER_MIN_MS = 1000L
         /** Gravity Z below this (m/s²) means screen-down & roughly flat → matrix faces up. */
         const val FACE_DOWN_Z = -9f
+        /** Hysteresis: leave face-down once Z rises above this. */
+        const val FACE_UP_Z = -7f
         /** LEDs are dark below roughly this value. */
         const val MIN_VISIBLE = 65
+        /** The Glyph SDK caps brightness here (confirmed: values above don't get brighter). */
+        const val MAX_BRIGHTNESS = 255
     }
 }

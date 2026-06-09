@@ -34,7 +34,7 @@ object DigitFont {
     fun renderNumber(ctx: Context, text: String, n: Int, brightness: Int): IntArray {
         val out = IntArray(n * n)
         val font = ensure(ctx)
-        val b = brightness.coerceIn(0, 255)
+        val b = brightness.coerceAtLeast(0)
 
         val glyphs = text.mapNotNull { ch ->
             val d = ch - '0'

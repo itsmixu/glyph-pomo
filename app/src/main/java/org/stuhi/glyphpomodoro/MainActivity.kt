@@ -2,11 +2,14 @@ package org.stuhi.glyphpomodoro
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -57,7 +60,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -68,6 +76,7 @@ import kotlinx.coroutines.launch
 import org.stuhi.glyphpomodoro.ui.Glyph
 import org.stuhi.glyphpomodoro.ui.GlyphTheme
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 private enum class Screen { MAIN, DIGITS, ICONS }
 
@@ -81,6 +90,7 @@ class MainActivity : ComponentActivity() {
             GlyphTheme {
                 Surface(color = Glyph.Bg) {
                     var screen by remember { mutableStateOf(Screen.MAIN) }
+                    BackHandler(enabled = screen != Screen.MAIN) { screen = Screen.MAIN }
                     when (screen) {
                         Screen.MAIN -> HomeScreen(
                             onEditDigits = { screen = Screen.DIGITS },
@@ -104,6 +114,7 @@ private fun HomeScreen(onEditDigits: () -> Unit, onEditIcons: () -> Unit) {
     val scope = rememberCoroutineScope()
     val settings by repo.flow.collectAsState(initial = Settings())
     val timer by TimerController.state.collectAsState()
+    val config by TimerController.config.collectAsState()
 
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(500) } }
@@ -141,7 +152,11 @@ private fun HomeScreen(onEditDigits: () -> Unit, onEditIcons: () -> Unit) {
     fun control(c: Ctl) {
         val app = ctx.applicationContext
         when (c) {
-            Ctl.TOGGLE -> { TimerController.onTrigger(app); PomodoroAlarm.scheduleOrCancel(app) }
+            Ctl.TOGGLE -> {
+                TimerController.onTrigger(app)
+                if (settings.haptics) Haptics.tick(app)
+                PomodoroAlarm.scheduleOrCancel(app)
+            }
             Ctl.SKIP -> { TimerController.advance(app); PomodoroAlarm.scheduleOrCancel(app) }
             Ctl.RESET -> { TimerController.reset(app); PomodoroAlarm.cancel(app) }
             Ctl.STOP -> { TimerController.setDormant(app); PomodoroAlarm.cancel(app) }
@@ -150,51 +165,68 @@ private fun HomeScreen(onEditDigits: () -> Unit, onEditIcons: () -> Unit) {
     }
 
     val running = timer.state == RunState.RUNNING
-    val primaryLabel = when (timer.state) {
-        RunState.RUNNING -> "PAUSE"
-        RunState.PAUSED -> "RESUME"
-        else -> "START"
-    }
 
     Scaffold(
         containerColor = Glyph.Bg,
         topBar = {
             Column(
-                Modifier.background(Glyph.Bg).statusBarsPadding().padding(horizontal = 20.dp)
+                Modifier.background(Glyph.Bg).statusBarsPadding()
+                    .padding(horizontal = 20.dp).padding(bottom = 14.dp)
             ) {
                 Header(running)
                 Spacer(Modifier.height(16.dp))
-                StatusCard(timer, TimerController.remainingMs(now))
+                StatusCard(timer, TimerController.remainingMs(now), config.rounds, ::control)
             }
         },
-        bottomBar = { ControlBar(primaryLabel, ::control) },
     ) { inner ->
         Column(
             Modifier
                 .padding(inner)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(4.dp))
             SectionLabel("CUSTOMISE")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Tile("Digit font", Modifier.weight(1f), onEditDigits)
                 Tile("Icons", Modifier.weight(1f), onEditIcons)
             }
 
-            SectionLabel("BRIGHTNESS")
+            SectionLabel("POMODORO")
             Panel {
-                SliderRow("RUNNING", "${settings.brightness}", settings.brightness.toFloat(), 65f..255f) { v ->
-                    scope.launch { repo.setBrightness(v.toInt()) }
+                SliderRow("WORK", "${config.workMin} min", config.workMin.toFloat(), 1f..60f) { v ->
+                    TimerController.setConfig(ctx.applicationContext, config.copy(workMin = v.roundToInt()))
                 }
                 Spacer(Modifier.height(6.dp))
+                SliderRow("SHORT BREAK", "${config.shortMin} min", config.shortMin.toFloat(), 1f..30f) { v ->
+                    TimerController.setConfig(ctx.applicationContext, config.copy(shortMin = v.roundToInt()))
+                }
+                Spacer(Modifier.height(6.dp))
+                SliderRow("LONG BREAK", "${config.longMin} min", config.longMin.toFloat(), 1f..60f) { v ->
+                    TimerController.setConfig(ctx.applicationContext, config.copy(longMin = v.roundToInt()))
+                }
+                Spacer(Modifier.height(6.dp))
+                SliderRow("ROUNDS", "${config.rounds}", config.rounds.toFloat(), 2f..8f, steps = 5) { v ->
+                    TimerController.setConfig(ctx.applicationContext, config.copy(rounds = v.roundToInt()))
+                }
+            }
+
+            SectionLabel("BRIGHTNESS")
+            Panel {
+                val runIdx = ((settings.brightness - 65f) / (255f - 65f) * 9f).roundToInt().coerceIn(0, 9)
                 SliderRow(
-                    "PAUSED",
-                    if (settings.pausedBrightness <= 0) "off" else "${settings.pausedBrightness}",
-                    settings.pausedBrightness.toFloat(), 0f..255f,
-                ) { v -> scope.launch { repo.setPausedBrightness(v.toInt()) } }
+                    "RUNNING", "${runIdx + 1}/10",
+                    settings.brightness.toFloat(), 65f..255f, steps = 8,
+                ) { v -> scope.launch { repo.setBrightness(v.roundToInt()) } }
+                Spacer(Modifier.height(6.dp))
+                val pauseIdx = (settings.pausedBrightness / 255f * 10f).roundToInt().coerceIn(0, 10)
+                SliderRow(
+                    "PAUSED", if (pauseIdx == 0) "off" else "$pauseIdx/10",
+                    settings.pausedBrightness.toFloat(), 0f..255f, steps = 9,
+                ) { v -> scope.launch { repo.setPausedBrightness(v.roundToInt()) } }
             }
 
             SectionLabel("SHAKE")
@@ -212,6 +244,25 @@ private fun HomeScreen(onEditDigits: () -> Unit, onEditIcons: () -> Unit) {
                 onResetStrength = { v -> scope.launch { repo.setResetShakeThreshold(v) } },
                 onResetHold = { v -> scope.launch { repo.setResetHoldMs(v.toInt()) } },
             )
+
+            SectionLabel("BEHAVIOUR")
+            Panel {
+                SwitchRow("Off when upright", settings.offWhenUpright) {
+                    scope.launch { repo.setOffWhenUpright(it) }
+                }
+                Spacer(Modifier.height(4.dp))
+                SwitchRow("Pause when picked up", settings.pauseOnPickup) {
+                    scope.launch { repo.setPauseOnPickup(it) }
+                }
+                Spacer(Modifier.height(4.dp))
+                SwitchRow("Resume when set down", settings.autoResume) {
+                    scope.launch { repo.setAutoResume(it) }
+                }
+                Spacer(Modifier.height(4.dp))
+                SwitchRow("Vibrate on start/pause", settings.haptics) {
+                    scope.launch { repo.setHaptics(it) }
+                }
+            }
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -230,9 +281,10 @@ private fun Header(running: Boolean) {
 }
 
 @Composable
-private fun StatusCard(timer: TimerSnapshot, remainingMs: Long) {
+private fun StatusCard(timer: TimerSnapshot, remainingMs: Long, rounds: Int, onCtl: (Ctl) -> Unit) {
     val isBreak = timer.phase != Phase.WORK
-    val showTime = timer.state == RunState.RUNNING || timer.state == RunState.PAUSED
+    val running = timer.state == RunState.RUNNING
+    val showTime = running || timer.state == RunState.PAUSED
     val secs = (remainingMs / 1000).toInt()
     val timeText = if (showTime) "%02d:%02d".format(secs / 60, secs % 60) else "––:––"
     val phaseText = timer.phase.name.replace('_', ' ')
@@ -245,46 +297,89 @@ private fun StatusCard(timer: TimerSnapshot, remainingMs: Long) {
                 color = if (isBreak) Glyph.Muted else Glyph.Red,
             )
             Spacer(Modifier.weight(1f))
-            BlockDots(timer.completedWorkBlocks)
+            BlockDots(timer.completedWorkBlocks, rounds)
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         Text(timeText, style = MaterialTheme.typography.displaySmall, color = Glyph.Text)
-        Spacer(Modifier.height(6.dp))
-        Text(timer.state.name, style = MaterialTheme.typography.bodySmall, color = Glyph.Muted)
+
+        Spacer(Modifier.height(16.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CtlButton(CtlIcon.STOP, primary = false) { onCtl(Ctl.RESET) }
+            CtlButton(if (running) CtlIcon.PAUSE else CtlIcon.PLAY, primary = true) { onCtl(Ctl.TOGGLE) }
+            CtlButton(CtlIcon.SKIP, primary = false) { onCtl(Ctl.SKIP) }
+        }
     }
 }
 
+private enum class CtlIcon { PLAY, PAUSE, RESET, SKIP, STOP }
+
 @Composable
-private fun BlockDots(completed: Int) {
-    val filled = completed % Pomodoro.WORK_BLOCKS_PER_LONG_BREAK
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        repeat(Pomodoro.WORK_BLOCKS_PER_LONG_BREAK) { i ->
-            Box(
-                Modifier.size(7.dp).clip(CircleShape)
-                    .background(if (i < filled) Glyph.Red else Glyph.CellOff)
+private fun CtlButton(icon: CtlIcon, primary: Boolean, onClick: () -> Unit) {
+    val dim = if (primary) 58.dp else 46.dp
+    val fg = if (primary) Color.White else Glyph.Text
+    val box = Modifier.size(dim).clip(CircleShape)
+    val styled = if (primary) box.background(Glyph.Red) else box.border(1.dp, Glyph.Line, CircleShape)
+    Box(styled.clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(if (primary) 22.dp else 17.dp)) { drawCtlIcon(icon, fg) }
+    }
+}
+
+private fun DrawScope.drawCtlIcon(icon: CtlIcon, color: Color) {
+    val w = size.width
+    val h = size.height
+    when (icon) {
+        CtlIcon.PLAY -> drawPath(
+            // Nudged right so the triangle reads optically centered in the circle.
+            Path().apply {
+                moveTo(w * 0.18f, h * 0.06f); lineTo(w * 0.18f, h * 0.94f); lineTo(w * 0.96f, h / 2f); close()
+            },
+            color,
+        )
+        CtlIcon.PAUSE -> {
+            val bw = w * 0.32f
+            drawRect(color, Offset(0f, 0f), Size(bw, h))
+            drawRect(color, Offset(w - bw, 0f), Size(bw, h))
+        }
+        CtlIcon.STOP -> drawRect(color, Offset(0f, 0f), Size(w, h))
+        CtlIcon.SKIP -> {
+            val tw = w * 0.72f
+            drawPath(Path().apply { moveTo(0f, 0f); lineTo(tw, h / 2f); lineTo(0f, h); close() }, color)
+            drawRect(color, Offset(w - w * 0.16f, 0f), Size(w * 0.16f, h))
+        }
+        CtlIcon.RESET -> {
+            val s = w * 0.16f
+            drawArc(
+                color, startAngle = 35f, sweepAngle = 285f, useCenter = false,
+                topLeft = Offset(s / 2f, s / 2f), size = Size(w - s, h - s),
+                style = Stroke(width = s, cap = StrokeCap.Round),
+            )
+            val r = (w - s) / 2f
+            val ang = Math.toRadians(35.0)
+            val ax = w / 2f + r * kotlin.math.cos(ang).toFloat()
+            val ay = h / 2f + r * kotlin.math.sin(ang).toFloat()
+            val a = w * 0.3f
+            drawPath(
+                Path().apply { moveTo(ax - a / 2f, ay); lineTo(ax + a / 2f, ay - a / 2f); lineTo(ax + a / 2f, ay + a / 2f); close() },
+                color,
             )
         }
     }
 }
 
 @Composable
-private fun ControlBar(primaryLabel: String, onCtl: (Ctl) -> Unit) {
-    Surface(color = Glyph.Black) {
-        Column(Modifier.navigationBarsPadding()) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Glyph.Line))
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GhostButton("RESET", Modifier.weight(1f)) { onCtl(Ctl.RESET) }
-                    GhostButton("SKIP", Modifier.weight(1f)) { onCtl(Ctl.SKIP) }
-                    GhostButton("STOP", Modifier.weight(1f)) { onCtl(Ctl.STOP) }
-                }
-                Button(
-                    onClick = { onCtl(Ctl.TOGGLE) },
-                    modifier = Modifier.fillMaxWidth().height(58.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Glyph.Red, contentColor = Color.White),
-                ) { Text(primaryLabel, style = MaterialTheme.typography.labelLarge) }
-            }
+private fun BlockDots(completed: Int, rounds: Int) {
+    val n = rounds.coerceAtLeast(1)
+    val filled = completed % n
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        repeat(n) { i ->
+            Box(
+                Modifier.size(7.dp).clip(CircleShape)
+                    .background(if (i < filled) Glyph.Red else Glyph.CellOff)
+            )
         }
     }
 }
@@ -336,17 +431,17 @@ private fun ShakeCard(
         SliderRow(
             "START / PAUSE",
             "avg ${"%.1f".format(accelAvg)}  pk ${"%.1f".format(accelPeak)}  ▸ ${"%.1f".format(threshold)}",
-            threshold, 0f..30f, onThreshold,
+            threshold, 0f..30f, onChange = onThreshold,
         )
         SliderRow(
             "RESET STRENGTH",
             "▸ ${"%.1f".format(resetStrength)}",
-            resetStrength, 0f..30f, onResetStrength,
+            resetStrength, 0f..30f, onChange = onResetStrength,
         )
         SliderRow(
             "RESET HOLD",
             "${"%.1f".format(resetHoldMs / 1000f)} s",
-            resetHoldMs.toFloat(), 500f..4000f, onResetHold,
+            resetHoldMs.toFloat(), 500f..4000f, onChange = onResetHold,
         )
     }
 }
@@ -357,6 +452,7 @@ private fun SliderRow(
     value: String,
     sliderValue: Float,
     range: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
     onChange: (Float) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -365,7 +461,7 @@ private fun SliderRow(
         Text(value, style = MaterialTheme.typography.bodySmall, color = Glyph.Muted)
     }
     Slider(
-        value = sliderValue, onValueChange = onChange, valueRange = range,
+        value = sliderValue, onValueChange = onChange, valueRange = range, steps = steps,
         colors = SliderDefaults.colors(
             thumbColor = Glyph.Red, activeTrackColor = Glyph.Red, inactiveTrackColor = Glyph.Line,
         ),
@@ -373,6 +469,15 @@ private fun SliderRow(
 }
 
 // ---------------------------------------------------------------- Digit editor
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = Glyph.Text)
+        Spacer(Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
 
 @Composable
 private fun DigitEditorScreen(onBack: () -> Unit) {
@@ -453,20 +558,26 @@ private fun IconEditorScreen(onBack: () -> Unit) {
             if (frameCount <= 1) "1 FRAME · STATIC ICON" else "$frameCount FRAMES · ANIMATION",
             style = MaterialTheme.typography.labelMedium, color = Glyph.Muted,
         )
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            for (f in 0 until frameCount) Chip("${f + 1}", f == frameIdx) { frameIdx = f }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (f in 0 until frameCount) Chip("${f + 1}", f == frameIdx) { frameIdx = f }
+            }
+            Spacer(Modifier.width(8.dp))
             Chip("+", false) {
                 IconStore.addFrame(ctx, icon)
                 frameCount = IconStore.frameCount(ctx, icon)
                 frameIdx = frameCount - 1
             }
-            if (frameCount > 1) Chip("−", false) {
-                IconStore.removeFrame(ctx, icon, frameIdx)
-                frameCount = IconStore.frameCount(ctx, icon)
-                frameIdx = frameIdx.coerceAtMost(frameCount - 1)
+            if (frameCount > 1) {
+                Spacer(Modifier.width(6.dp))
+                Chip("−", false) {
+                    IconStore.removeFrame(ctx, icon, frameIdx)
+                    frameCount = IconStore.frameCount(ctx, icon)
+                    frameIdx = frameIdx.coerceAtMost(frameCount - 1)
+                }
             }
         }
 

@@ -1,6 +1,7 @@
 package org.stuhi.glyphpomodoro
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -18,10 +19,18 @@ data class Settings(
     val resetShakeThreshold: Float = 8f,
     /** How long the sustained shake must last (ms) to reset. */
     val resetHoldMs: Int = 970,
-    /** LED brightness while running (0–255). */
+    /** LED brightness while running. */
     val brightness: Int = 255,
-    /** LED brightness while paused (0–255). */
+    /** LED brightness while paused. */
     val pausedBrightness: Int = 70,
+    /** Blank the matrix unless the phone is face-down. */
+    val offWhenUpright: Boolean = true,
+    /** Pause the running timer when the phone is picked up. */
+    val pauseOnPickup: Boolean = false,
+    /** Resume after the phone is set back down (if it was auto-paused). */
+    val autoResume: Boolean = false,
+    /** Vibrate when the timer starts/pauses/resumes. */
+    val haptics: Boolean = true,
 )
 
 class SettingsRepo(private val ctx: Context) {
@@ -33,6 +42,10 @@ class SettingsRepo(private val ctx: Context) {
             resetHoldMs = p[RESET_HOLD] ?: 970,
             brightness = p[BRIGHT] ?: 255,
             pausedBrightness = p[BRIGHT_PAUSED] ?: 70,
+            offWhenUpright = p[OFF_UPRIGHT] ?: true,
+            pauseOnPickup = p[PAUSE_PICKUP] ?: false,
+            autoResume = p[AUTO_RESUME] ?: false,
+            haptics = p[HAPTICS] ?: true,
         )
     }
 
@@ -41,6 +54,10 @@ class SettingsRepo(private val ctx: Context) {
     suspend fun setResetHoldMs(v: Int) = ctx.dataStore.edit { it[RESET_HOLD] = v }
     suspend fun setBrightness(v: Int) = ctx.dataStore.edit { it[BRIGHT] = v }
     suspend fun setPausedBrightness(v: Int) = ctx.dataStore.edit { it[BRIGHT_PAUSED] = v }
+    suspend fun setOffWhenUpright(v: Boolean) = ctx.dataStore.edit { it[OFF_UPRIGHT] = v }
+    suspend fun setPauseOnPickup(v: Boolean) = ctx.dataStore.edit { it[PAUSE_PICKUP] = v }
+    suspend fun setAutoResume(v: Boolean) = ctx.dataStore.edit { it[AUTO_RESUME] = v }
+    suspend fun setHaptics(v: Boolean) = ctx.dataStore.edit { it[HAPTICS] = v }
 
     private companion object {
         val SHAKE = floatPreferencesKey("shake_threshold")
@@ -48,5 +65,9 @@ class SettingsRepo(private val ctx: Context) {
         val RESET_HOLD = intPreferencesKey("reset_hold_ms")
         val BRIGHT = intPreferencesKey("brightness")
         val BRIGHT_PAUSED = intPreferencesKey("brightness_paused")
+        val OFF_UPRIGHT = booleanPreferencesKey("off_when_upright")
+        val PAUSE_PICKUP = booleanPreferencesKey("pause_on_pickup")
+        val AUTO_RESUME = booleanPreferencesKey("auto_resume")
+        val HAPTICS = booleanPreferencesKey("haptics")
     }
 }

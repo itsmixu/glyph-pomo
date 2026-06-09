@@ -31,6 +31,32 @@ object TimerController {
     private val _state = MutableStateFlow(TimerSnapshot())
     val state: StateFlow<TimerSnapshot> = _state
 
+    /** Editable durations (minutes) and how many work blocks precede a long break. */
+    data class PomodoroConfig(
+        val workMin: Int = 25,
+        val shortMin: Int = 5,
+        val longMin: Int = 15,
+        val rounds: Int = 4,
+    )
+
+    private val _config = MutableStateFlow(PomodoroConfig())
+    val config: StateFlow<PomodoroConfig> = _config
+
+    fun setConfig(ctx: Context, c: PomodoroConfig) {
+        _config.value = c
+        prefs(ctx).edit()
+            .putInt("cfg_work", c.workMin).putInt("cfg_short", c.shortMin)
+            .putInt("cfg_long", c.longMin).putInt("cfg_rounds", c.rounds).apply()
+    }
+
+    private fun durationMinutes(phase: Phase): Int = _config.value.let {
+        when (phase) {
+            Phase.WORK -> it.workMin
+            Phase.SHORT_BREAK -> it.shortMin
+            Phase.LONG_BREAK -> it.longMin
+        }
+    }
+
     fun remainingMs(now: Long): Long = _state.value.let {
         when (it.state) {
             RunState.RUNNING -> (it.endTimeMillis - now).coerceAtLeast(0)
@@ -39,7 +65,7 @@ object TimerController {
         }
     }
 
-    fun phaseTotalMs(): Long = _state.value.phase.defaultMinutes * 60_000L
+    fun phaseTotalMs(): Long = durationMinutes(_state.value.phase) * 60_000L
 
     fun setArmed(ctx: Context) = mutate(ctx) { it.copy(state = RunState.ARMED) }
 
@@ -66,7 +92,12 @@ object TimerController {
     fun advance(ctx: Context, now: Long = System.currentTimeMillis()) {
         val s = _state.value
         val completed = if (s.phase == Phase.WORK) s.completedWorkBlocks + 1 else s.completedWorkBlocks
-        startPhase(ctx, Pomodoro.nextPhase(s.phase, completed), completed, now)
+        val next = if (s.phase == Phase.WORK) {
+            if (completed % _config.value.rounds.coerceAtLeast(1) == 0) Phase.LONG_BREAK else Phase.SHORT_BREAK
+        } else {
+            Phase.WORK
+        }
+        startPhase(ctx, next, completed, now)
     }
 
     private fun startPhase(ctx: Context, phase: Phase, completed: Int, now: Long) = mutate(ctx) {
@@ -75,7 +106,7 @@ object TimerController {
         it.copy(
             state = RunState.RUNNING,
             phase = phase,
-            endTimeMillis = now + phase.defaultMinutes * 60_000L,
+            endTimeMillis = now + durationMinutes(phase) * 60_000L,
             remainingAtPauseMs = 0L,
             completedWorkBlocks = completed,
         ).withMarker(marker)
@@ -114,6 +145,12 @@ object TimerController {
 
     fun restore(ctx: Context) {
         val p = prefs(ctx)
+        _config.value = PomodoroConfig(
+            workMin = p.getInt("cfg_work", 25),
+            shortMin = p.getInt("cfg_short", 5),
+            longMin = p.getInt("cfg_long", 15),
+            rounds = p.getInt("cfg_rounds", 4),
+        )
         if (!p.contains("state")) return
         _state.value = TimerSnapshot(
             state = RunState.entries[p.getInt("state", 0)],

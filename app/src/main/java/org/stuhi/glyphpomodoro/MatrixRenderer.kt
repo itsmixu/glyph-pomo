@@ -62,7 +62,7 @@ object MatrixRenderer {
         val out = IntArray(n * n)
         val c = (n - 1) / 2.0
         val rOuter = c
-        val b = brightness.coerceIn(0, 255)
+        val b = brightness.coerceAtLeast(0)
         for (y in 0 until n) {
             for (x in 0 until n) {
                 if (abs(hypot(x - c, y - c) - rOuter) <= 0.5) out[y * n + x] = b
