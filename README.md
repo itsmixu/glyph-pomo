@@ -1,11 +1,11 @@
 # Glyph Pomodoro
 
 A Pomodoro timer that lives on the **Glyph Matrix** of the Nothing **Phone (4a) Pro** —
-controlled entirely by the phone.
+controlled by shaking the phone.
 
 <!-- 📸 Add a photo of the toy running on the matrix here -->
 <p align="center">
-  <img src="docs/demo.jpg" alt="Glyph Pomodoro running on a Phone (4a) Pro" width="320">
+  <img src="docs/demo.jpg" alt="Glyph Pomodoro running on a Phone (4a) Pro" width="500">
 </p>
 
 ## How to use
